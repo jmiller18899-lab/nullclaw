@@ -1497,6 +1497,21 @@ fn expectedHttpRequestSize(raw: []const u8) !?usize {
     return total;
 }
 
+fn configureRequestReadTimeout(stream: *std.net.Stream) void {
+    if (!@hasDecl(std.posix.SO, "RCVTIMEO")) return;
+
+    const timeout = std.posix.timeval{
+        .sec = @intCast(REQUEST_TIMEOUT_SECS),
+        .usec = 0,
+    };
+    std.posix.setsockopt(
+        stream.handle,
+        std.posix.SOL.SOCKET,
+        std.posix.SO.RCVTIMEO,
+        &std.mem.toBytes(timeout),
+    ) catch {};
+}
+
 fn readHttpRequestFromReader(allocator: std.mem.Allocator, reader: anytype) ![]u8 {
     var request_buf: std.ArrayListUnmanaged(u8) = .empty;
     errdefer request_buf.deinit(allocator);
@@ -1505,7 +1520,10 @@ fn readHttpRequestFromReader(allocator: std.mem.Allocator, reader: anytype) ![]u
     var chunk: [2048]u8 = undefined;
 
     while (true) {
-        const n = try reader.read(&chunk);
+        const n = reader.read(&chunk) catch |err| switch (err) {
+            error.WouldBlock, error.ConnectionTimedOut => return error.RequestTimeout,
+            else => return err,
+        };
         if (n == 0) return error.IncompleteRequest;
 
         try request_buf.appendSlice(allocator, chunk[0..n]);
@@ -2690,6 +2708,7 @@ pub fn run(allocator: std.mem.Allocator, host: []const u8, port: u16, config_ptr
     while (true) {
         var conn = server.accept() catch continue;
         defer conn.stream.close();
+        configureRequestReadTimeout(&conn.stream);
 
         // Per-request arena — all request-scoped allocations freed in one shot
         var arena = std.heap.ArenaAllocator.init(allocator);
@@ -2701,6 +2720,7 @@ pub fn run(allocator: std.mem.Allocator, host: []const u8, port: u16, config_ptr
             switch (err) {
                 error.RequestTooLarge => writeJsonResponse(&conn.stream, "413 Payload Too Large", "{\"error\":\"request too large\"}"),
                 error.InvalidContentLength => writeJsonResponse(&conn.stream, "400 Bad Request", "{\"error\":\"invalid content-length\"}"),
+                error.RequestTimeout => writeJsonResponse(&conn.stream, "408 Request Timeout", "{\"error\":\"request timeout\"}"),
                 else => {},
             }
             continue;
@@ -4104,6 +4124,19 @@ test "readHttpRequestFromReader returns IncompleteRequest for truncated body" {
     };
     var reader = ChunkedReader{ .chunks = chunks[0..] };
     try std.testing.expectError(error.IncompleteRequest, readHttpRequestFromReader(std.testing.allocator, &reader));
+}
+
+test "readHttpRequestFromReader maps WouldBlock to RequestTimeout" {
+    const TimeoutReader = struct {
+        const ReadError = error{ WouldBlock, ConnectionTimedOut };
+
+        fn read(_: *@This(), _: []u8) ReadError!usize {
+            return error.WouldBlock;
+        }
+    };
+
+    var reader = TimeoutReader{};
+    try std.testing.expectError(error.RequestTimeout, readHttpRequestFromReader(std.testing.allocator, &reader));
 }
 
 test "userFacingAgentError maps ProviderDoesNotSupportVision" {
