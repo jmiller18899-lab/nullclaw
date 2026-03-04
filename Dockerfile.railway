@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1
+#
+# Railway-specific Dockerfile.
+# Differences from the default Dockerfile:
+#   - single-platform build (no cross-compile / BUILDPLATFORM)
+#   - honours $PORT at runtime (Railway injects it)
+#   - runs as root (Railway manages isolation)
+
+# ── Stage 1: Build ────────────────────────────────────────────
+FROM alpine:3.23 AS builder
+
+RUN apk add --no-cache zig musl-dev
+
+WORKDIR /app
+COPY build.zig build.zig.zon ./
+COPY src/ src/
+COPY vendor/sqlite3/ vendor/sqlite3/
+
+RUN zig build -Doptimize=ReleaseSmall
+
+# ── Stage 2: Config Prep ─────────────────────────────────────
+FROM busybox:1.37 AS config
+
+RUN mkdir -p /nullclaw-data/.nullclaw /nullclaw-data/workspace
+
+RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
+{
+  "api_key": "",
+  "default_provider": "openrouter",
+  "default_model": "anthropic/claude-sonnet-4",
+  "default_temperature": 0.7,
+  "gateway": {
+    "port": 3000,
+    "host": "::",
+    "allow_public_bind": true
+  }
+}
+EOF
+
+# ── Stage 3: Runtime ──────────────────────────────────────────
+FROM alpine:3.23
+
+LABEL org.opencontainers.image.source=https://github.com/nullclaw/nullclaw
+
+RUN apk add --no-cache ca-certificates curl tzdata
+
+COPY --from=builder /app/zig-out/bin/nullclaw /usr/local/bin/nullclaw
+COPY --from=config /nullclaw-data /nullclaw-data
+
+ENV NULLCLAW_WORKSPACE=/nullclaw-data/workspace
+ENV HOME=/nullclaw-data
+ENV PORT=3000
+
+WORKDIR /nullclaw-data
+EXPOSE ${PORT}
+ENTRYPOINT ["nullclaw"]
+CMD ["gateway", "--port", "3000", "--host", "::"]
