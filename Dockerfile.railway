@@ -64,10 +64,40 @@ FROM alpine:3.23
 
 LABEL org.opencontainers.image.source=https://github.com/nullclaw/nullclaw
 
-RUN apk add --no-cache ca-certificates curl tzdata
+RUN apk add --no-cache ca-certificates curl tzdata jq
 
 COPY --from=builder /app/zig-out/bin/nullclaw /usr/local/bin/nullclaw
 COPY --from=config /nullclaw-data /nullclaw-data
+
+# Startup script: inject env-var secrets into config.json, then exec nullclaw.
+RUN cat > /usr/local/bin/start.sh << 'SCRIPT'
+#!/bin/sh
+set -e
+CFG="/nullclaw-data/.nullclaw/config.json"
+
+# Inject Gemini API key
+if [ -n "$GEMINI_API_KEY" ]; then
+  jq --arg k "$GEMINI_API_KEY" '.models.providers.gemini.api_key = $k' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+fi
+
+# Inject Slack bot token
+if [ -n "$SLACK_BOT_TOKEN" ]; then
+  jq --arg t "$SLACK_BOT_TOKEN" '.channels.slack.accounts.main.bot_token = $t' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+fi
+
+# Inject Slack app-level token
+if [ -n "$SLACK_APP_TOKEN" ]; then
+  jq --arg t "$SLACK_APP_TOKEN" '.channels.slack.accounts.main.app_token = $t' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+fi
+
+# Inject Slack signing secret
+if [ -n "$SLACK_SIGNING_SECRET" ]; then
+  jq --arg s "$SLACK_SIGNING_SECRET" '.channels.slack.accounts.main.signing_secret = $s' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+fi
+
+exec nullclaw "$@"
+SCRIPT
+RUN chmod +x /usr/local/bin/start.sh
 
 ENV NULLCLAW_WORKSPACE=/nullclaw-data/workspace
 ENV HOME=/nullclaw-data
@@ -75,5 +105,5 @@ ENV PORT=3000
 
 WORKDIR /nullclaw-data
 EXPOSE ${PORT}
-ENTRYPOINT ["nullclaw"]
+ENTRYPOINT ["/usr/local/bin/start.sh"]
 CMD ["gateway", "--port", "3000", "--host", "::"]
