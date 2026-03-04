@@ -26,10 +26,17 @@ RUN mkdir -p /nullclaw-data/.nullclaw /nullclaw-data/workspace
 RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
 {
   "default_temperature": 0.7,
+  "models": {
+    "providers": {
+      "gemini": {
+        "api_key": ""
+      }
+    }
+  },
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openrouter/anthropic/claude-sonnet-4"
+        "primary": "gemini/gemini-2.0-flash"
       }
     }
   },
