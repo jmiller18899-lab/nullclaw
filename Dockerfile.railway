@@ -40,6 +40,17 @@ RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
       }
     }
   },
+  "channels": {
+    "slack": {
+      "accounts": {
+        "main": {
+          "bot_token": "",
+          "app_token": "",
+          "allow_from": ["*"]
+        }
+      }
+    }
+  },
   "gateway": {
     "port": 3000,
     "host": "::",
