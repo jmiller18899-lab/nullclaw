@@ -26,6 +26,7 @@ RUN mkdir -p /nullclaw-data/.nullclaw /nullclaw-data/workspace
 RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
 {
   "default_temperature": 0.7,
+  "max_tokens": 2048,
   "models": {
     "providers": {
       "openrouter": {
@@ -82,22 +83,6 @@ RUN apk add --no-cache ca-certificates curl tzdata jq nginx
 
 COPY --from=builder /app/zig-out/bin/nullclaw /usr/local/bin/nullclaw
 COPY --from=config /nullclaw-data /nullclaw-data
-
-# Debug: install curl wrapper to log all curl calls and capture responses
-RUN mv /usr/bin/curl /usr/bin/curl-real && \
-    cat > /usr/bin/curl << 'WRAP' && chmod +x /usr/bin/curl
-#!/bin/sh
-LOG=/proc/1/fd/2
-echo "[curl-debug] ARGS: $*" | head -c 2000 > $LOG
-TMPF=$(mktemp /tmp/curl-resp.XXXXXX)
-/usr/bin/curl-real "$@" > "$TMPF"
-RET=$?
-RESP=$(head -c 1000 "$TMPF")
-echo "[curl-debug] EXIT=$RET RESP=$RESP" > $LOG
-cat "$TMPF"
-rm -f "$TMPF"
-exit $RET
-WRAP
 
 # nginx config: reverse proxy port 3000 -> gateway (3001) + web channel WS (32123)
 RUN mkdir -p /run/nginx && cat > /etc/nginx/http.d/default.conf << 'NGINX'
