@@ -173,6 +173,29 @@ if [ -n "$NULLCLAW_WEB_TOKEN" ]; then
   jq --arg t "$NULLCLAW_WEB_TOKEN" '.channels.web.default.auth_token = $t' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
 fi
 
+# Debug: verify config after injection
+echo "=== Config providers ==="
+jq '.models.providers | keys' "$CFG"
+echo "=== OpenRouter key length ==="
+jq -r '.models.providers.openrouter.api_key | length' "$CFG"
+echo "=== OpenRouter key prefix ==="
+jq -r '.models.providers.openrouter.api_key[:10]' "$CFG"
+echo "=== Primary model ==="
+jq -r '.agents.defaults.model.primary' "$CFG"
+
+# Debug: test OpenRouter API directly with curl
+echo "=== Testing OpenRouter API from container ==="
+OR_KEY=$(jq -r '.models.providers.openrouter.api_key' "$CFG")
+curl -s -w '\nHTTP_CODE:%{http_code}\n' -X POST https://openrouter.ai/api/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OR_KEY" \
+  -H "HTTP-Referer: https://github.com/nullclaw/nullclaw" \
+  -H "X-Title: nullclaw" \
+  -d '{"model":"anthropic/claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"max_tokens":5}' \
+  2>&1 | head -c 500
+echo ""
+echo "=== End OpenRouter test ==="
+
 # Start nginx in background (reverse proxy on port 3000)
 nginx
 
