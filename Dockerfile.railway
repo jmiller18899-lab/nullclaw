@@ -28,7 +28,7 @@ RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
   "default_temperature": 0.7,
   "models": {
     "providers": {
-      "anthropic": {
+      "openrouter": {
         "api_key": ""
       },
       "gemini": {
@@ -39,7 +39,7 @@ RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
   "agents": {
     "defaults": {
       "model": {
-        "primary": "anthropic/claude-sonnet-4-20250514"
+        "primary": "openrouter/anthropic/claude-sonnet-4"
       }
     }
   },
@@ -143,9 +143,9 @@ RUN cat > /usr/local/bin/start.sh << 'SCRIPT'
 set -e
 CFG="/nullclaw-data/.nullclaw/config.json"
 
-# Inject Anthropic API key
-if [ -n "$ANTHROPIC_API_KEY" ]; then
-  jq --arg k "$ANTHROPIC_API_KEY" '.models.providers.anthropic.api_key = $k' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+# Inject OpenRouter API key
+if [ -n "$OPENROUTER_API_KEY" ]; then
+  jq --arg k "$OPENROUTER_API_KEY" '.models.providers.openrouter.api_key = $k' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
 fi
 
 # Inject Gemini API key (fallback)
