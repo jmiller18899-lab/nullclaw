@@ -54,7 +54,7 @@ RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
       "default": {
         "transport": "local",
         "port": 32123,
-        "listen": "0.0.0.0",
+        "listen": "127.0.0.1",
         "path": "/ws",
         "message_auth_mode": "token",
         "allowed_origins": ["*"],
