@@ -57,7 +57,6 @@ RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
       "listen": "0.0.0.0",
       "path": "/ws",
       "message_auth_mode": "token",
-      "auth_token": "",
       "allowed_origins": ["*"],
       "max_connections": 64
     }]
