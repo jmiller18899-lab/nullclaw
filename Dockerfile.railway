@@ -49,10 +49,21 @@ RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
           "allow_from": ["*"]
         }
       }
-    }
+    },
+    "web": [{
+      "account_id": "default",
+      "transport": "local",
+      "port": 32123,
+      "listen": "0.0.0.0",
+      "path": "/ws",
+      "message_auth_mode": "token",
+      "auth_token": "",
+      "allowed_origins": ["*"],
+      "max_connections": 64
+    }]
   },
   "gateway": {
-    "port": 3000,
+    "port": 3001,
     "host": "::",
     "require_pairing": false
   }
@@ -64,12 +75,40 @@ FROM alpine:3.23
 
 LABEL org.opencontainers.image.source=https://github.com/nullclaw/nullclaw
 
-RUN apk add --no-cache ca-certificates curl tzdata jq
+RUN apk add --no-cache ca-certificates curl tzdata jq nginx
 
 COPY --from=builder /app/zig-out/bin/nullclaw /usr/local/bin/nullclaw
 COPY --from=config /nullclaw-data /nullclaw-data
 
-# Startup script: inject env-var secrets into config.json, then exec nullclaw.
+# nginx config: reverse proxy port 3000 -> gateway (3001) + web channel WS (32123)
+RUN mkdir -p /run/nginx && cat > /etc/nginx/http.d/default.conf << 'NGINX'
+server {
+    listen 3000;
+    listen [::]:3000;
+
+    # WebSocket: /ws -> nullclaw web channel on 32123
+    location /ws {
+        proxy_pass http://127.0.0.1:32123;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    # Everything else -> nullclaw gateway on 3001
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 30s;
+    }
+}
+NGINX
+
+# Startup script: inject env-var secrets into config.json, start nginx, then exec nullclaw.
 RUN cat > /usr/local/bin/start.sh << 'SCRIPT'
 #!/bin/sh
 set -e
@@ -95,6 +134,15 @@ if [ -n "$SLACK_SIGNING_SECRET" ]; then
   jq --arg s "$SLACK_SIGNING_SECRET" '.channels.slack.accounts.main.signing_secret = $s' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
 fi
 
+# Inject Web channel auth token
+if [ -n "$NULLCLAW_WEB_TOKEN" ]; then
+  jq --arg t "$NULLCLAW_WEB_TOKEN" '.channels.web[0].auth_token = $t' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+fi
+
+# Start nginx in background (reverse proxy on port 3000)
+nginx
+
+# Start nullclaw gateway on port 3001 (nginx proxies to it)
 exec nullclaw "$@"
 SCRIPT
 RUN chmod +x /usr/local/bin/start.sh
@@ -106,4 +154,4 @@ ENV PORT=3000
 WORKDIR /nullclaw-data
 EXPOSE ${PORT}
 ENTRYPOINT ["/usr/local/bin/start.sh"]
-CMD ["gateway", "--port", "3000", "--host", "::"]
+CMD ["gateway", "--port", "3001", "--host", "::"]
