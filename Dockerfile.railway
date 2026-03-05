@@ -36,7 +36,7 @@ RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
   "agents": {
     "defaults": {
       "model": {
-        "primary": "gemini/gemini-2.0-flash"
+        "primary": "gemini/gemini-2.5-flash"
       }
     }
   },
