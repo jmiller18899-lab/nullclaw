@@ -32,6 +32,9 @@ RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
       "openrouter": {
         "api_key": ""
       },
+      "openai": {
+        "api_key": ""
+      },
       "gemini": {
         "api_key": ""
       }
@@ -169,9 +172,19 @@ if [ -n "$SLACK_SIGNING_SECRET" ]; then
   jq --arg s "$SLACK_SIGNING_SECRET" '.channels.slack.accounts.main.signing_secret = $s' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
 fi
 
+# Inject OpenAI API key
+if [ -n "$OPENAI_API_KEY" ]; then
+  jq --arg k "$OPENAI_API_KEY" '.models.providers.openai.api_key = $k' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+fi
+
 # Inject Web channel auth token
 if [ -n "$NULLCLAW_WEB_TOKEN" ]; then
   jq --arg t "$NULLCLAW_WEB_TOKEN" '.channels.web.default.auth_token = $t' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+fi
+
+# Override default model if NULLCLAW_MODEL env var is set
+if [ -n "$NULLCLAW_MODEL" ]; then
+  jq --arg m "$NULLCLAW_MODEL" '.agents.defaults.model.primary = $m' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
 fi
 
 # Start nginx in background (reverse proxy on port 3000)
