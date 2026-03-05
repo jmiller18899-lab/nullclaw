@@ -87,16 +87,39 @@ server {
     listen [::]:3000;
 
     # WebSocket: /ws -> nullclaw web channel on 32123
-    # proxy_pass_request_headers off strips all client headers to stay
-    # under nullclaw's 1024-byte WebSocket handshake limit, then we
-    # re-add only the minimal headers needed for the upgrade.
+    # Clear bulky browser/Railway headers to stay under nullclaw's
+    # 1024-byte WebSocket handshake buffer while keeping essential
+    # WS headers (Upgrade, Connection, Sec-WebSocket-*).
     location /ws {
         proxy_pass http://127.0.0.1:32123;
         proxy_http_version 1.1;
-        proxy_pass_request_headers off;
-        proxy_set_header Host "localhost";
-        proxy_set_header Upgrade websocket;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header Host "localhost";
+        # Clear large browser headers
+        proxy_set_header Accept "";
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header Accept-Language "";
+        proxy_set_header User-Agent "";
+        proxy_set_header Cookie "";
+        proxy_set_header Origin "";
+        proxy_set_header Cache-Control "";
+        proxy_set_header Pragma "";
+        proxy_set_header Sec-Fetch-Dest "";
+        proxy_set_header Sec-Fetch-Mode "";
+        proxy_set_header Sec-Fetch-Site "";
+        proxy_set_header Sec-Fetch-User "";
+        proxy_set_header Sec-GPC "";
+        proxy_set_header DNT "";
+        proxy_set_header Sec-WebSocket-Extensions "";
+        # Clear Railway/proxy-added headers
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header X-Forwarded-Proto "";
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header X-Real-IP "";
+        proxy_set_header X-Request-ID "";
+        proxy_set_header X-Envoy-External-Address "";
+        proxy_set_header Via "";
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
     }
