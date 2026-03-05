@@ -87,13 +87,16 @@ server {
     listen [::]:3000;
 
     # WebSocket: /ws -> nullclaw web channel on 32123
+    # proxy_pass_request_headers off strips all client headers to stay
+    # under nullclaw's 1024-byte WebSocket handshake limit, then we
+    # re-add only the minimal headers needed for the upgrade.
     location /ws {
         proxy_pass http://127.0.0.1:32123;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_pass_request_headers off;
+        proxy_set_header Host "localhost";
+        proxy_set_header Upgrade websocket;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
     }
