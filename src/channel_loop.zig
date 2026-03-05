@@ -11,6 +11,7 @@ const session_mod = @import("session.zig");
 const ConversationContext = @import("agent/prompt.zig").ConversationContext;
 const providers = @import("providers/root.zig");
 const memory_mod = @import("memory/root.zig");
+const bootstrap_mod = @import("bootstrap/root.zig");
 const observability = @import("observability.zig");
 const tools_mod = @import("tools/root.zig");
 const mcp = @import("mcp.zig");
@@ -74,7 +75,10 @@ fn processTelegramMessage(
         .group_id = if (is_group) sender else null,
     };
 
-    const reply = runtime.session_mgr.processMessage(session_key, content, conversation_context) catch |err| {
+    var stream_ctx = telegram.TelegramChannel.StreamCtx{ .tg_ptr = tg_ptr, .chat_id = sender };
+    const sink = tg_ptr.makeSink(&stream_ctx);
+
+    const reply = runtime.session_mgr.processMessageStreaming(session_key, content, conversation_context, sink) catch |err| {
         log.err("Agent error: {}", .{err});
         const err_msg: []const u8 = switch (err) {
             error.CurlFailed, error.CurlReadError, error.CurlWaitError, error.CurlWriteError => "Network error. Please try again.",
@@ -84,16 +88,27 @@ fn processTelegramMessage(
             error.OutOfMemory => "Out of memory.",
             else => "An error occurred. Try again or /new for a fresh session.",
         };
+        if (sink != null) {
+            tg_ptr.channel().sendEvent(sender, "", &.{}, .final) catch {};
+        }
         tg_ptr.sendMessageWithReply(sender, err_msg, reply_to_id) catch |send_err| log.err("failed to send error reply: {}", .{send_err});
         return;
     };
     defer allocator.free(reply);
 
     if (shouldSuppressGroupReply(is_group, reply)) {
+        if (sink != null) {
+            tg_ptr.channel().sendEvent(sender, "", &.{}, .final) catch {};
+        }
         log.info("Smart reply: skipping non-essential message", .{});
         return;
     }
 
+    if (sink != null) {
+        tg_ptr.channel().sendEvent(sender, "", &.{}, .final) catch |err| {
+            log.warn("Draft cleanup error: {}", .{err});
+        };
+    }
     tg_ptr.sendAssistantMessageWithReply(sender, message_sender_id, is_group, reply, reply_to_id) catch |err| {
         log.warn("Send error: {}", .{err});
     };
@@ -142,6 +157,7 @@ fn messageTaskWorker(task_ptr: *MessageTask) void {
     }
     task_ptr.run();
 }
+
 const TELEGRAM_OFFSET_STORE_VERSION: i64 = 1;
 
 fn extractTelegramBotId(bot_token: []const u8) ?[]const u8 {
@@ -330,6 +346,7 @@ pub const ChannelRuntime = struct {
     provider_bundle: provider_runtime.RuntimeProviderBundle,
     tools: []const tools_mod.Tool,
     mem_rt: ?memory_mod.MemoryRuntime,
+    bootstrap_provider: ?bootstrap_mod.BootstrapProvider,
     noop_obs: *observability.NoopObserver,
     subagent_manager: ?*subagent_mod.SubagentManager,
     policy_tracker: *security.RateTracker,
@@ -375,12 +392,26 @@ pub const ChannelRuntime = struct {
             .autonomy = config.autonomy.level,
             .workspace_dir = config.workspace_dir,
             .workspace_only = config.autonomy.workspace_only,
-            .allowed_commands = if (config.autonomy.allowed_commands.len > 0) config.autonomy.allowed_commands else &security.default_allowed_commands,
+            .allowed_commands = security.resolveAllowedCommands(config.autonomy.level, config.autonomy.allowed_commands),
             .max_actions_per_hour = config.autonomy.max_actions_per_hour,
             .require_approval_for_medium_risk = config.autonomy.require_approval_for_medium_risk,
             .block_high_risk_commands = config.autonomy.block_high_risk_commands,
+            .allow_raw_url_chars = config.autonomy.allow_raw_url_chars,
             .tracker = policy_tracker,
         };
+
+        // Optional memory backend
+        var mem_rt = memory_mod.initRuntime(allocator, &config.memory, config.workspace_dir);
+        errdefer if (mem_rt) |*rt| rt.deinit();
+        const mem_opt: ?memory_mod.Memory = if (mem_rt) |rt| rt.memory else null;
+
+        const bootstrap_provider: ?bootstrap_mod.BootstrapProvider = bootstrap_mod.createProvider(
+            allocator,
+            config.memory.backend,
+            mem_opt,
+            config.workspace_dir,
+        ) catch null;
+        errdefer if (bootstrap_provider) |bp| bp.deinit();
 
         // Tools
         const tools = tools_mod.allTools(allocator, config.workspace_dir, .{
@@ -400,13 +431,10 @@ pub const ChannelRuntime = struct {
             .allowed_paths = config.autonomy.allowed_paths,
             .policy = security_policy,
             .subagent_manager = subagent_manager,
+            .bootstrap_provider = bootstrap_provider,
+            .backend_name = config.memory.backend,
         }) catch &.{};
         errdefer if (tools.len > 0) tools_mod.deinitTools(allocator, tools);
-
-        // Optional memory backend
-        var mem_rt = memory_mod.initRuntime(allocator, &config.memory, config.workspace_dir);
-        errdefer if (mem_rt) |*rt| rt.deinit();
-        const mem_opt: ?memory_mod.Memory = if (mem_rt) |rt| rt.memory else null;
 
         // Noop observer (heap for vtable stability)
         const noop_obs = try allocator.create(observability.NoopObserver);
@@ -427,6 +455,7 @@ pub const ChannelRuntime = struct {
             .provider_bundle = runtime_provider,
             .tools = tools,
             .mem_rt = mem_rt,
+            .bootstrap_provider = bootstrap_provider,
             .noop_obs = noop_obs,
             .subagent_manager = subagent_manager,
             .policy_tracker = policy_tracker,
@@ -446,6 +475,7 @@ pub const ChannelRuntime = struct {
         const alloc = self.allocator;
         self.session_mgr.deinit();
         if (self.tools.len > 0) tools_mod.deinitTools(alloc, self.tools);
+        if (self.bootstrap_provider) |bp| bp.deinit();
         if (self.subagent_manager) |mgr| {
             mgr.deinit();
             alloc.destroy(mgr);
