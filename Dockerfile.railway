@@ -203,3 +203,4 @@ WORKDIR /nullclaw-data
 EXPOSE ${PORT}
 ENTRYPOINT ["/usr/local/bin/start.sh"]
 CMD ["gateway", "--port", "3001", "--host", "::"]
+
