@@ -187,6 +187,37 @@ if [ -n "$NULLCLAW_MODEL" ]; then
   jq --arg m "$NULLCLAW_MODEL" '.agents.defaults.model.primary = $m' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
 fi
 
+# Debug: test curl connectivity before starting nullclaw
+echo "=== STARTUP DIAGNOSTICS ==="
+echo "curl version: $(curl --version | head -1)"
+echo "which curl: $(which curl)"
+echo "DNS test (openrouter.ai):"
+nslookup openrouter.ai 2>&1 | head -5 || echo "nslookup not available"
+echo "curl test (OpenRouter auth/key):"
+if [ -n "$OPENROUTER_API_KEY" ]; then
+  MASKED_KEY="$(echo "$OPENROUTER_API_KEY" | cut -c1-8)...$(echo "$OPENROUTER_API_KEY" | rev | cut -c1-4 | rev)"
+  echo "  API key: $MASKED_KEY"
+  curl -sv --max-time 10 -H "Authorization: Bearer $OPENROUTER_API_KEY" https://openrouter.ai/api/v1/auth/key 2>&1 | tail -20
+else
+  echo "  OPENROUTER_API_KEY not set!"
+fi
+echo "curl test (Gemini):"
+if [ -n "$GEMINI_API_KEY" ]; then
+  curl -s --max-time 10 "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" 2>&1 | head -5
+else
+  echo "  GEMINI_API_KEY not set!"
+fi
+echo "Proxy env vars:"
+echo "  HTTPS_PROXY=${HTTPS_PROXY:-unset}"
+echo "  HTTP_PROXY=${HTTP_PROXY:-unset}"
+echo "  ALL_PROXY=${ALL_PROXY:-unset}"
+echo "  https_proxy=${https_proxy:-unset}"
+echo "  http_proxy=${http_proxy:-unset}"
+echo "Config (masked):"
+jq '.models.providers | to_entries | map({key: .key, has_key: (.value.api_key | length > 0)})' "$CFG" 2>/dev/null
+echo "Model: $(jq -r '.agents.defaults.model.primary' "$CFG" 2>/dev/null)"
+echo "=== END DIAGNOSTICS ==="
+
 # Start nginx in background (reverse proxy on port 3000)
 nginx
 
@@ -203,4 +234,3 @@ WORKDIR /nullclaw-data
 EXPOSE ${PORT}
 ENTRYPOINT ["/usr/local/bin/start.sh"]
 CMD ["gateway", "--port", "3001", "--host", "::"]
-
