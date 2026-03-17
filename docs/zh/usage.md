@@ -2,6 +2,12 @@
 
 本页聚焦日常操作、服务化运行和常见故障排查。
 
+## 页面导航
+
+- 这页适合谁：已经完成安装与基础配置，准备日常使用、服务化运行或排障的人。
+- 看完去哪里：命令细节继续看 [命令参考](./commands.md)；要核对配置字段看 [配置指南](./configuration.md)；涉及 webhook 与对外接入看 [Gateway API](./gateway-api.md)。
+- 如果你是从某页来的：从 [安装指南](./installation.md) 来，这页就是首次跑通的下一站；从 [配置指南](./configuration.md) 来，这页用来验证配置是否真能工作；从 [Gateway API](./gateway-api.md) 来，可回到这里看长期运行与排障顺序。
+
 ## 首次启动流程
 
 1. 执行初始化：
@@ -43,6 +49,8 @@ nullclaw gateway
 | `nullclaw channel start telegram` | 启动指定渠道 |
 | `nullclaw migrate openclaw --dry-run` | 预演迁移 OpenClaw 数据 |
 | `nullclaw migrate openclaw` | 执行迁移 |
+| `nullclaw history list [--limit N] [--offset N] [--json]` | 列出会话记录 |
+| `nullclaw history show <session_id> [--limit N] [--offset N] [--json]` | 查看指定会话的消息详情 |
 
 ## 服务化运行建议
 
@@ -119,6 +127,34 @@ nullclaw onboard --interactive
 - 未配置 tunnel 或反向代理。
 - 防火墙未放行端口。
 
+### 5) provider 返回 429 / “rate limit exceeded”
+
+常见原因：
+
+- 额度较低的 coding plan 往往扛不住 tool-heavy 的 agent 回合，即使普通聊天还看起来能用。
+- 当前 provider 计划对重试频率很敏感。
+- 主 provider 被限流后，没有配置可切换的 fallback。
+
+建议排查：
+
+- 前台运行时先用 `nullclaw agent --verbose`。
+- service 模式下查看 `~/.nullclaw/logs/daemon.stdout.log` 与 `~/.nullclaw/logs/daemon.stderr.log`。
+- 跑一次 `nullclaw status`，确认当前实际使用的 provider / model。
+
+如果 plan 本身可用但限流很严，建议保守调整 reliability：
+
+```json
+{
+  "reliability": {
+    "provider_retries": 1,
+    "provider_backoff_ms": 3000,
+    "fallback_providers": ["openrouter"]
+  }
+}
+```
+
+如果同一 provider 有多把 key，可以配置 `reliability.api_keys` 让 NullClaw 在限流时轮转。
+
 ## 变更后回归检查清单
 
 每次改配置后，建议按顺序执行：
@@ -136,3 +172,16 @@ nullclaw agent -m "self-check"
 nullclaw gateway
 curl http://127.0.0.1:3000/health
 ```
+
+## 下一步
+
+- 要细查具体 CLI 行为：继续看 [命令参考](./commands.md)，按子命令逐项核对。
+- 要排查配置或调整 provider/channel：继续看 [配置指南](./configuration.md)。
+- 要把网关开放给外部系统：继续看 [Gateway API](./gateway-api.md) 和 [安全机制](./security.md)。
+
+## 相关页面
+
+- [安装指南](./installation.md)
+- [配置指南](./configuration.md)
+- [命令参考](./commands.md)
+- [Gateway API](./gateway-api.md)
