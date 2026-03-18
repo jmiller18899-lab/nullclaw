@@ -183,8 +183,20 @@ if [ -n "$NULLCLAW_WEB_TOKEN" ]; then
 fi
 
 # Override default model if NULLCLAW_MODEL env var is set
+# Auto-prefix provider if NULLCLAW_MODEL is missing "provider/" prefix
 if [ -n "$NULLCLAW_MODEL" ]; then
-  jq --arg m "$NULLCLAW_MODEL" '.agents.defaults.model.primary = $m' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+  MODEL="$NULLCLAW_MODEL"
+  case "$MODEL" in
+    */*) ;; # already has provider/ prefix
+    gemini-*)    MODEL="gemini/$MODEL" ;;
+    gpt-*|o1-*|o3-*|o4-*|chatgpt-*) MODEL="openai/$MODEL" ;;
+    claude-*)    MODEL="anthropic/$MODEL" ;;
+    deepseek-*)  MODEL="deepseek/$MODEL" ;;
+    mistral-*|codestral-*|pixtral-*) MODEL="mistral/$MODEL" ;;
+    llama-*|meta-llama*) MODEL="openrouter/meta-llama/$MODEL" ;;
+    *)           MODEL="openrouter/$MODEL" ;;
+  esac
+  jq --arg m "$MODEL" '.agents.defaults.model.primary = $m' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
 fi
 
 # Debug: test curl connectivity before starting nullclaw
